@@ -2,6 +2,12 @@
 
 ## Before announcing
 
+- [x] Review r4 (2026-10-27): APPROUVÉ, no blocker (4th round, rule of 5).
+- [ ] Next patch — review r4 leftovers: tell a clock wrongly set ahead from
+      the NTP correction of a late start with the Edge's own time
+      (`_meta/SystemTimeUtc`, to check on a real FEMS); during a token pause
+      each password read leaves a token on the Edge (only for an Edge that
+      ignores tokens).
 - [ ] Test on a real Gladys 5.1+ with a real FENECON FEMS (Home 10 or 20)
       and, if possible, a plain OpenEMS Edge: log-in with the guest
       password, test button, device creation, the counters over a day.
