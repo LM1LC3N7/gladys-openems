@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-27
+
 ### Added
 
 - FENECON FEMS / OpenEMS Edge read locally through its JSON-RPC WebSocket API
@@ -27,3 +29,6 @@ the notes of the version's GitHub Release.
 - After a restart of the container, the first read waits the interval and one
   minute after the last session, also in a new process.
 - Grid mode 3 (off-grid with a genset).
+
+[Unreleased]: https://github.com/LM1LC3N7/gladys-openems/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/LM1LC3N7/gladys-openems/releases/tag/v0.1.1
