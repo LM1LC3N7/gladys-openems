@@ -101,6 +101,8 @@ export async function startFakeEdge(options = {}) {
       }
       if (m.method === 'authenticateWithToken') {
         record.tokenLogins += 1;
+        if (o.tokenLogin === 'silent') return undefined;
+        if (o.tokenLogin === 'close') return void client.close();
         if (!record.tokens.has(m.params?.token)) return void error(1003);
         return void ok(loginResult(m.params.token));
       }

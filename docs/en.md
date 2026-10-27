@@ -73,8 +73,9 @@ A lifetime counter only rises. Every counter goes through a guard:
 - a **drop** (a reset, a replaced meter) or a **jump** of more than 100 kW on
   average (plus 0.5 kWh) since the last value is **held back**: the last accepted value is
   sent again, the status shows it, and time never confirms it (the guard runs
-  on the elapsed time of the integration, so a clock corrected by hours changes
-  nothing);
+  on the elapsed time of the integration, so a clock corrected by hours while
+  it runs changes nothing; at its restart it starts again from the system
+  time, and a date saved in the future is brought back to now);
 - if it is right, click **Accept the held counter** twice (the first click
   lists, the second, from 3 s to 5 min later, accepts exactly what was
   listed). After a drop is accepted, counting goes on from the new value; the

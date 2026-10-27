@@ -237,3 +237,16 @@ test('an edgeRpc answer whose inner id is not ours is "protocol"', async (t) => 
   const fake = await edge(t, { subscribe: 'otherId' });
   assert.equal(await codeOf(client().read(creds(fake))), 'protocol');
 });
+
+test('a log-in by token without answer, or closed: the token forgotten, the password next', async (t) => {
+  for (const tokenLogin of ['silent', 'close']) {
+    const fake = await edge(t);
+    const reader = client();
+    await reader.read(creds(fake));
+    fake.options.tokenLogin = tokenLogin;
+    assert.notEqual(await codeOf(reader.read(creds(fake))), 'resolved', tokenLogin);
+    assert.notEqual(await codeOf(reader.read(creds(fake))), 'refused', tokenLogin);
+    assert.equal(fake.record.logins, 2, tokenLogin);
+    assert.equal(fake.record.tokenLogins, 1, tokenLogin);
+  }
+});

@@ -141,7 +141,11 @@ export class OpenemsClient {
     } catch (err) {
       // Any error ends the session now: never an open socket until the session timer.
       session.fail(err);
-      if (session.tokenRejected || err?.code === 'refused') this.token = undefined;
+      // A token refused, or a log-in by token that failed in any way (no
+      // answer, closed: review r2, m-r2-1): forgotten, the next read sends the password.
+      if (session.tokenRejected || session.tokenPending || err?.code === 'refused') {
+        this.token = undefined;
+      }
       throw err;
     } finally {
       await session.closed;
@@ -348,7 +352,9 @@ class Session {
     let login;
     let newToken;
     if (token) {
+      this.tokenPending = true;
       login = await this.call(request('authenticateWithToken', { token }));
+      this.tokenPending = false;
       if (login.error || !isObject(login.result)) {
         // Unknown to the Edge (restarted, cleared): forgotten, never a refusal.
         this.tokenRejected = true;

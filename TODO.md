@@ -115,6 +115,15 @@
   genset); production and house powers down to -100 W shown as 0; the old host
   name never said to answer when none is readable.
 
+- **Review r2** (2026-10-27): /data keeps the dates of the guards on the
+  wall clock of the moment they are written (session date + wall - session),
+  read back onto the session clock then capped at it; a log-in by token that
+  fails in any way (no answer, closed) forgets the token, the next read sends
+  the password; the wait after a restart is a monotonic deadline taken at
+  load. Left: a life that starts with a wrong wall clock (before NTP) and
+  never sees it corrected writes wrong dates; the next life caps a future one
+  and only its first read can see a wider margin.
+
 ## Ideas
 
 - Keep the session open and take the pushes (as ha_openems) if a real Edge

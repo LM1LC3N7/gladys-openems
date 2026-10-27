@@ -80,7 +80,9 @@ Un compteur à vie ne fait que monter. Chaque compteur passe par une garde :
   100 kW en moyenne (plus 0,5 kWh) depuis la dernière valeur est **retenu** : la dernière
   valeur acceptée est renvoyée, l'état l'affiche, et le temps ne le confirme
   jamais (la garde compte le temps écoulé de l'intégration : une horloge
-  corrigée de plusieurs heures n'y change rien) ;
+  corrigée de plusieurs heures pendant qu'elle tourne n'y change rien ; à son
+  redémarrage, elle repart de l'heure du système, et une date enregistrée dans
+  le futur est ramenée à maintenant) ;
 - s'il est juste, cliquez deux fois sur **Accepter le compteur retenu** (le
   premier clic liste, le second, de 3 s à 5 min plus tard, accepte exactement
   ce qui a été listé). Après une baisse acceptée, le comptage reprend à la

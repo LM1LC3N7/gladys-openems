@@ -171,7 +171,22 @@ export class OpenemsApp {
      * After a restart of the container: the first read waits the interval
      * and the minute the last session may have come after the one written.
      */
-    this.restartedAt = this.kept.lastAttemptAt > 0 ? this.kept.lastAttemptAt : 0;
+    // Turned into a monotonic instant at once (review r2, m-r2-3): a wall
+    // clock set back during the wait never postpones the first read.
+    this.restartedAt =
+      this.kept.lastAttemptAt > 0
+        ? this.monotonic() - Math.max(0, this.now() - this.kept.lastAttemptAt)
+        : 0;
+  }
+
+  /**
+   * Wall minus session clock, now: /data keeps the dates of the guards on the
+   * wall clock of the moment they are written, so that a life started before
+   * NTP set the clock (session clock hours behind) never leaves dates that
+   * widen the margin of the next life (review r2, m-r2-2).
+   */
+  wallOffset() {
+    return this.now() - this.sessionNow();
   }
 
   // --- Lifecycle -------------------------------------------------------------
@@ -473,8 +488,12 @@ export class OpenemsApp {
       return false;
     }
     const counters = Object.assign(Object.create(null), this.kept.counters);
+    const offset = this.wallOffset();
+    const toWall = (ref) =>
+      ref && Number.isFinite(ref.at) ? { ...ref, at: ref.at + offset } : ref;
     for (const [id, guard] of this.guards) {
-      counters[id] = { guard: guard.state() };
+      const state = guard.state();
+      counters[id] = { guard: { last: toWall(state.last), held: toWall(state.held) } };
     }
     this.kept.counters = counters;
     const now = this.now();
@@ -550,7 +569,8 @@ export class OpenemsApp {
     }
     if (!manual && this.retryAtMono > mono) at.push(now + this.retryAtMono - mono);
     if (this.restartedAt > 0) {
-      at.push(this.restartedAt + ATTEMPT_SAVE_EVERY + this.intervalMs());
+      // Monotonic, as the interval (review r2, m-r2-3).
+      at.push(now + this.restartedAt + ATTEMPT_SAVE_EVERY + this.intervalMs() - mono);
     }
     if (!manual && this.kept.refusal) at.push(Infinity);
     return Math.max(...at);
@@ -676,14 +696,21 @@ export class OpenemsApp {
   guardOf(created, id) {
     if (!this.guards.has(id)) {
       const saved = this.kept.counters[id];
-      const now = this.sessionNow();
+      // The guard lives on the session clock (never the wall clock, which NTP
+      // may have moved since the start: review r2, R4).
+      const sessionNow = this.sessionNow();
+      // /data holds wall dates (saveState): back to the session clock.
+      const offset = this.now() - sessionNow;
+      const toSession = (ref) =>
+        ref && Number.isFinite(ref.at) ? { ...ref, at: ref.at - offset } : ref;
       // A date "in the future" (a wall clock set back across a restart) is now:
-      // the margin of the next rise never shrinks to nothing.
+      // the margin of the next rise never shrinks to nothing (review r2, R3).
       const clamp = (ref) =>
-        ref && Number.isFinite(ref.at) ? { ...ref, at: Math.min(ref.at, now) } : ref;
+        ref && Number.isFinite(ref.at) ? { ...ref, at: Math.min(ref.at, sessionNow) } : ref;
       const guardState = saved?.guard
-        ? { ...saved.guard, last: clamp(saved.guard.last) }
+        ? { ...saved.guard, last: clamp(toSession(saved.guard.last)) }
         : saved?.guard;
+      const now = sessionNow;
       this.guards.set(
         id,
         new IndexGuard(clamp(lastValueOf(created, id)), guardState, now, COUNTER_LIMITS),

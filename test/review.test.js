@@ -291,3 +291,136 @@ test('m5: after an accepted drop with nothing else held, no "stays held" line', 
   assert.doesNotMatch(done.data.message.en, /stays held/);
   await app.stop();
 });
+
+const COUNTER_ID = 'ext:openems:edge:fems12345:production_index';
+
+test('R3 (r2): a /data date in the future is capped at the session clock: the morning rise passes', async () => {
+  const clock = ntpClock();
+  let production = 12_345_678;
+  const store = createMemoryStore({
+    counters: {
+      [COUNTER_ID]: { guard: { last: { value: 12345.678, at: START + 10 * HOUR }, held: null } },
+    },
+  });
+  const { app, gladys, advance } = await setup({
+    clock,
+    store,
+    devices: [created()],
+    script: () => answer({ '_sum/ProductionActiveEnergy': production }),
+  });
+  await app.start(CONFIG);
+  await app.idle();
+  await advance(35_000);
+  production += 600;
+  await advance(35_000);
+  assert.equal(last(gladys, 'production_index'), 12346.278);
+  await app.stop();
+});
+
+test('R4 (r2): a guard loaded after NTP set the wall clock back 10 h keeps +900 kWh held', async () => {
+  const clock = ntpClock();
+  const store = createMemoryStore({
+    counters: {
+      [COUNTER_ID]: { guard: { last: { value: 12345.678, at: START - MINUTE }, held: null } },
+    },
+  });
+  const { app, gladys } = await setup({
+    clock,
+    store,
+    devices: [created()],
+    script: () => answer({ '_sum/ProductionActiveEnergy': 13_245_678 }),
+  });
+  // The app is built (session clock anchored), then NTP sets the wall clock back.
+  clock.shift(-10 * HOUR);
+  await app.start(CONFIG);
+  await app.idle();
+  assert.equal(last(gladys, 'production_index'), 12345.678);
+  assert.match(status(gladys).message.en, /jumped from 12345.678 to 13245.678/);
+  await app.stop();
+});
+
+test('m-r2-2: a life whose clock NTP corrected writes wall dates: the next life holds +900 kWh', async () => {
+  const clock = ntpClock();
+  // Life 1 starts 10 h late (before NTP), then NTP corrects the wall clock.
+  clock.shift(-10 * HOUR);
+  const store = createMemoryStore();
+  let production = 12_345_678;
+  const script = () => answer({ '_sum/ProductionActiveEnergy': production });
+  const one = await setup({ clock, store, devices: [created()], script });
+  await one.app.start(CONFIG);
+  await one.app.idle();
+  clock.shift(10 * HOUR);
+  await one.advance(35_000);
+  await one.app.stop();
+  // Life 2, right clock, at once: +900 kWh at its first read.
+  store.data.lastAttemptAt = 0;
+  production += 900_000;
+  const two = await setup({ clock, store, devices: [created()], script });
+  await two.app.start(CONFIG);
+  await two.app.idle();
+  assert.notEqual(last(two.gladys, 'production_index'), 13245.678);
+  assert.match(status(two.gladys).message.en, /jumped from 12345.678 to 13245.678/);
+  await two.app.stop();
+});
+
+test('m-r2-3: the wait after a restart is monotonic: a wall clock set back never postpones it', async () => {
+  const clock = ntpClock();
+  const store = createMemoryStore();
+  const one = await setup({ clock, store });
+  await one.app.start(CONFIG);
+  await one.app.idle();
+  await one.app.stop();
+  const two = await setup({ clock, store });
+  await two.app.start(CONFIG);
+  await two.app.idle();
+  assert.equal(two.client.calls.length, 0);
+  clock.shift(-10 * HOUR);
+  await two.advance(MINUTE + 35_000);
+  assert.equal(two.client.calls.length, 1);
+  await two.app.stop();
+});
+
+test('m-r2-4: the version comes from _meta/Version', async () => {
+  const { app, gladys } = await setup({
+    script: () => answer({ '_meta/Version': '2025.10.3' }, { version: undefined }),
+  });
+  await app.start(CONFIG);
+  await app.idle();
+  const [device] = gladys.fake.discoveredDevices;
+  assert.deepEqual(
+    device.params.find((p) => p.name === 'OPENEMS_VERSION'),
+    { name: 'OPENEMS_VERSION', value: '2025.10.3' },
+  );
+  assert.match(status(gladys).message.en, /OpenEMS 2025\.10\.3/);
+  await app.stop();
+});
+
+test('R4 (r2): a hold loaded from /data is dated on the session clock, never the wall clock', async () => {
+  const clock = ntpClock();
+  const held = { direction: 'up', from: 12345.678, to: 13245.678, threshold: 13245.678, at: START };
+  const store = createMemoryStore({
+    counters: {
+      [COUNTER_ID]: { guard: { last: { value: 12345.678, at: START - MINUTE }, held } },
+    },
+  });
+  let production;
+  const { app, gladys, advance } = await setup({
+    clock,
+    store,
+    devices: [created()],
+    script: () => answer({ '_sum/ProductionActiveEnergy': production ?? null }),
+  });
+  // Built, then NTP sets the wall clock back 10 h; the hold is loaded after.
+  clock.shift(-10 * HOUR);
+  await app.start(CONFIG);
+  await app.idle();
+  // The user accepts the hold as listed (13245.678 kWh)...
+  await gladys.fake.action(ACTIONS.ACCEPT_HELD);
+  await advance(5_000);
+  assert.match((await gladys.fake.action(ACTIONS.ACCEPT_HELD)).data.message.en, /Accepted/);
+  // ...then a glitch 900 kWh above it: beyond what may come since, held again.
+  production = 14_145_678;
+  await advance(35_000);
+  assert.notEqual(last(gladys, 'production_index'), 14145.678);
+  await app.stop();
+});
