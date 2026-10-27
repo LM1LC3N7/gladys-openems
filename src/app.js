@@ -28,9 +28,13 @@
 // values only go to the device of that host name (none readable: nothing
 // published).
 //
-// Two clocks: `now` (wall clock) dates the counters and what /data keeps;
-// `monotonic` paces the reads, so that a wall clock set back never stops
-// them. Each decision reads each clock once.
+// Clocks: `monotonic` paces the reads, so that a wall clock set back never
+// stops them. The guards of the counters run on the SESSION clock: the wall
+// clock read once at the start of the process plus the monotonic time since
+// (`sessionNow`), so that NTP moving the wall clock by hours never widens nor
+// narrows their margin (review r1, I1; lesson of gladys-p1-monitor). The wall
+// clock itself only dates what /data keeps for a restart. Each decision reads
+// each clock once.
 // -----------------------------------------------------------------------------
 
 import { createHash } from 'node:crypto';
@@ -96,6 +100,9 @@ export class OpenemsApp {
     this.now = now;
     this.monotonic = monotonic;
     this.timers = timers;
+    /** The session clock: wall at the start of the process + monotonic elapsed since. */
+    this.wallStart = now();
+    this.monoStart = monotonic();
     this.client = client ?? new OpenemsClient();
     this.store = store;
     this.loadStore();
@@ -138,6 +145,11 @@ export class OpenemsApp {
     this.configAttempt = 0;
     this.configFailures = 0;
     this.configTimer = undefined;
+  }
+
+  /** The session clock (ms since epoch): never moved by a wall clock set by NTP. */
+  sessionNow() {
+    return this.wallStart + (this.monotonic() - this.monoStart);
   }
 
   /**
@@ -606,7 +618,10 @@ export class OpenemsApp {
         );
         // The counters of the old device stay in /data (its device keeps its history).
       }
-      this.kept.info = { hostname: values.hostname, version: answer.edge?.version };
+      this.kept.info = {
+        hostname: values.hostname,
+        version: values.version ?? answer.edge?.version,
+      };
       this.known = true;
     }
     this.values = values;
@@ -661,9 +676,17 @@ export class OpenemsApp {
   guardOf(created, id) {
     if (!this.guards.has(id)) {
       const saved = this.kept.counters[id];
+      const now = this.sessionNow();
+      // A date "in the future" (a wall clock set back across a restart) is now:
+      // the margin of the next rise never shrinks to nothing.
+      const clamp = (ref) =>
+        ref && Number.isFinite(ref.at) ? { ...ref, at: Math.min(ref.at, now) } : ref;
+      const guardState = saved?.guard
+        ? { ...saved.guard, last: clamp(saved.guard.last) }
+        : saved?.guard;
       this.guards.set(
         id,
-        new IndexGuard(lastValueOf(created, id), saved?.guard, this.now(), COUNTER_LIMITS),
+        new IndexGuard(clamp(lastValueOf(created, id)), guardState, now, COUNTER_LIMITS),
       );
     }
     return this.guards.get(id);
@@ -681,7 +704,7 @@ export class OpenemsApp {
     if (!created || !external) {
       return undefined;
     }
-    const now = this.now();
+    const now = this.sessionNow();
     const features = new Set(
       (created.features ?? []).map((f) =>
         String(f.external_id ?? '')
@@ -817,7 +840,9 @@ export class OpenemsApp {
     else if (this.saveFailed) notes.push(T.notes.storeFailed);
     const held = this.heldList();
     if (held.length > 0) notes.push(T.notes.held(held));
-    await this.setStatus(true, T.ok(this.kept.info?.hostname, this.kept.info?.version, notes));
+    // Without a readable host name this time, the old name is not said to answer.
+    const shown = this.noHostname ? undefined : this.kept.info;
+    await this.setStatus(true, T.ok(shown?.hostname ?? '?', shown?.version, notes));
   }
 
   // --- Configuration screen buttons -------------------------------------------------
@@ -833,7 +858,7 @@ export class OpenemsApp {
   async acceptHeldCounter() {
     const list = this.heldList();
     const mono = this.monotonic();
-    const now = this.now();
+    const now = this.sessionNow();
     const pending = this.pendingAccept;
     this.pendingAccept = undefined;
     const elapsed = pending ? mono - pending.at : undefined;
@@ -873,7 +898,9 @@ export class OpenemsApp {
     }
     await this.saveState();
     // Published at the next read (never a read sooner than the interval).
-    return T.accept.done(accepted, changed);
+    const taken = new Set(accepted.map((h) => h.id));
+    const stillHeld = this.heldList().some((h) => !taken.has(h.id));
+    return T.accept.done(accepted, changed, stillHeld);
   }
 
   /**

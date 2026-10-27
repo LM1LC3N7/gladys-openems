@@ -59,9 +59,10 @@ test('the fingerprint of a refusal: 8 bits, salted, many passwords share it', ()
   const salt = '0123456789abcdef0123456789abcdef';
   const fp = fingerprint(salt, 'a:8085', { username: 'x', password: 'user' });
   assert.match(fp, /^[0-9a-f]{2}$/);
-  let same = 0;
-  for (let i = 0; i < 1024; i += 1) {
-    if (fingerprint(salt, 'a:8085', { username: 'x', password: `p${i}` }) === fp) same += 1;
+  // A brute force soon finds another password with the same fingerprint (1 in 256).
+  let other;
+  for (let i = 0; i < 4000 && other === undefined; i += 1) {
+    if (fingerprint(salt, 'a:8085', { username: 'x', password: `p${i}` }) === fp) other = i;
   }
-  assert.ok(same >= 1, 'a brute force finds several candidates, never one');
+  assert.notEqual(other, undefined);
 });

@@ -2,14 +2,19 @@
 // The channels read from the OpenEMS Edge and their values. Pure.
 //
 // Every value comes from the `_sum` component (the totals of the Edge, always
-// present) and `_host/Hostname` (the identity). Units and signs as OpenEMS
+// present), `_host/Hostname` (the identity) and `_meta/Version` (shown only;
+// a channel the Edge lacks is null, never an error of the subscription). Units and signs as OpenEMS
 // documents them (io.openems.edge.common.sum.Sum):
 // - powers in W; `EssActivePower` is negative while charging, positive while
 //   discharging; `GridActivePower` is positive when buying from the grid,
 //   negative when selling to it;
 // - energies in Wh, lifetime counters (CUMULATED_WATT_HOURS), shown in kWh;
 // - `EssSoc` in %; `State` 0 Ok, 1 Info, 2 Warning, 3 Fault (the worst state
-//   of all the components); `GridMode` 0 undefined, 1 on-grid, 2 off-grid.
+//   of all the components); `GridMode` -1 undefined, 1 on-grid, 2 off-grid,
+//   3 off-grid with a genset (review r1, m2).
+// - production and house powers a few watts below 0 (a measuring offset at
+//   night) are 0, so the last daytime value does not stay shown (review r1,
+//   m3); further below 0 they are left out.
 // A value that is not a finite number (null, a text, a boolean) is unknown,
 // never 0: `Number('')` would be 0, so no conversion is ever made.
 // -----------------------------------------------------------------------------
@@ -17,6 +22,7 @@
 /** The channel addresses subscribed to, and the name of their value. */
 export const CHANNELS = {
   hostname: '_host/Hostname',
+  version: '_meta/Version',
   soc: '_sum/EssSoc',
   essPower: '_sum/EssActivePower',
   gridPower: '_sum/GridActivePower',
@@ -58,6 +64,11 @@ export function versionOf(raw) {
   return /^[0-9A-Za-z][0-9A-Za-z.+-]{0,31}$/.test(value) ? value : undefined;
 }
 
+/** A power that cannot be negative: -SMALL_NEGATIVE_W..0 is 0, below is unknown. */
+export const SMALL_NEGATIVE_W = 100;
+const offsetToZero = (w) =>
+  w === undefined || w >= 0 ? w : w >= -SMALL_NEGATIVE_W ? 0 : undefined;
+
 /** An integer of a closed range, else undefined. */
 const intIn = (v, min, max) => (Number.isInteger(v) && v >= min && v <= max ? v : undefined);
 
@@ -73,14 +84,15 @@ export function parseValues(params) {
   const number = (name) => (isNumber(get(name)) ? get(name) : undefined);
   const values = {
     hostname: hostnameOf(get('hostname')),
+    version: versionOf(get('version')),
     soc: intIn(get('soc'), 0, 100),
     essPower: number('essPower'),
     gridPower: number('gridPower'),
-    productionPower: number('productionPower'),
-    consumptionPower: number('consumptionPower'),
+    productionPower: offsetToZero(number('productionPower')),
+    consumptionPower: offsetToZero(number('consumptionPower')),
     state: intIn(get('state'), 0, 3),
-    // 0 is "undefined": not a mode.
-    gridMode: intIn(get('gridMode'), 1, 2),
+    // -1 (or 0) is "undefined": not a mode.
+    gridMode: intIn(get('gridMode'), 1, 3),
   };
   for (const name of ENERGIES) {
     const wh = number(name);
@@ -93,6 +105,6 @@ export function parseValues(params) {
 /** Whether a `currentData` holds a useful value (a number of `_sum`): the Edge is alive. */
 export function hasUsefulValue(params) {
   return Object.keys(CHANNELS).some(
-    (name) => name !== 'hostname' && isNumber(params?.[CHANNELS[name]]),
+    (name) => name !== 'hostname' && name !== 'version' && isNumber(params?.[CHANNELS[name]]),
   );
 }

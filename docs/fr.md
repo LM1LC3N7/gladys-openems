@@ -22,7 +22,7 @@ Un appareil par Edge, nommé d'après son nom d'hôte (ex. `OpenEMS fems12345`) 
   maison, achat au réseau, vente au réseau, charge et décharge de la
   batterie ;
 - l'état du système (0 OK, 1 info, 2 avertissement, 3 défaut) et le mode
-  réseau (1 raccordé, 2 îloté) ;
+  réseau (1 raccordé, 2 îloté, 3 îloté sur groupe électrogène) ;
 - un **index de production** pour le suivi énergétique de Gladys (option
   « Production »).
 
@@ -52,7 +52,11 @@ déjà (ils seraient facturés deux fois).
 ## Comment il lit
 
 Chaque lecture ouvre une connexion à l'Edge, se connecte, s'abonne aux
-valeurs, prend les premières valeurs envoyées par l'Edge, et ferme. Une
+valeurs, prend les premières valeurs envoyées par l'Edge, et ferme. Le mot de
+passe n'est envoyé qu'une fois : les lectures suivantes se connectent avec le
+jeton donné par l'Edge (gardé en mémoire seulement, ni dans les journaux ni
+dans `/data`), pour que l'Edge n'empile pas un jeton par lecture ; après un
+redémarrage de l'Edge ou de l'intégration, le mot de passe est renvoyé. Une
 connexion à la fois, jamais plus vite que l'intervalle : ni au bouton de test,
 ni à la Découverte, ni à une reconnexion, ni après un redémarrage du conteneur
 (il attend l'intervalle plus une minute après la dernière session). Une
@@ -75,7 +79,8 @@ Un compteur à vie ne fait que monter. Chaque compteur passe par une garde :
 - une **baisse** (remise à zéro, compteur remplacé) ou un **saut** de plus de
   100 kW en moyenne (plus 0,5 kWh) depuis la dernière valeur est **retenu** : la dernière
   valeur acceptée est renvoyée, l'état l'affiche, et le temps ne le confirme
-  jamais ;
+  jamais (la garde compte le temps écoulé de l'intégration : une horloge
+  corrigée de plusieurs heures n'y change rien) ;
 - s'il est juste, cliquez deux fois sur **Accepter le compteur retenu** (le
   premier clic liste, le second, de 3 s à 5 min plus tard, accepte exactement
   ce qui a été listé). Après une baisse acceptée, le comptage reprend à la

@@ -48,6 +48,8 @@ test('real clock x20: reads at 0, the interval, twice the interval; one connecti
   assert.ok(clock.timersSet < 200, `${clock.timersSet} timers`);
   assert.equal(gladys.fake.connectionStatus.connected, true);
   assert.equal(edge.record.maxOpen, 1);
-  // The third read may be cut by the stop before its log-in.
-  assert.ok(edge.record.logins >= 2 && edge.record.logins <= 3, `${edge.record.logins}`);
+  // One password log-in, then the token (the third read may be cut by the stop).
+  assert.equal(edge.record.logins, 1);
+  assert.ok(edge.record.tokenLogins >= 1 && edge.record.tokenLogins <= 2);
+  assert.equal(edge.record.tokens.size, 1);
 });

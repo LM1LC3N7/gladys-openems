@@ -24,6 +24,8 @@ export const FEMS_WEB_PATH = '/websocket';
 export const CONNECT_TIMEOUT = 5_000;
 /** Each answer (the Edge answers within a second on the home network). */
 export const ANSWER_TIMEOUT = 8_000;
+/** A secondary request (`subscribeEdges`): no answer within this delay, the read goes on. */
+export const SECONDARY_TIMEOUT = 2_000;
 /** The first `currentData` after the subscription (the Edge sends one each cycle, 1 s). */
 export const DATA_TIMEOUT = 8_000;
 /** A whole session (connect, log in, subscribe, first data), whatever happens. */

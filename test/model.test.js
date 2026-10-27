@@ -66,3 +66,18 @@ test('alive only on a useful value of _sum', () => {
   assert.equal(hasUsefulValue({ [CHANNELS.soc]: 50 }), true);
   assert.equal(hasUsefulValue({ [CHANNELS.soc]: null }), false);
 });
+
+test('grid mode 3 (off-grid with genset) is a mode; -1 is not; a small negative power is 0', () => {
+  assert.equal(parseValues(edgeValues({ '_sum/GridMode': 3 })).gridMode, 3);
+  assert.equal(parseValues(edgeValues({ '_sum/GridMode': -1 })).gridMode, undefined);
+  assert.equal(parseValues(edgeValues({ '_sum/ProductionActivePower': -5 })).productionPower, 0);
+  assert.equal(
+    parseValues(edgeValues({ '_sum/ConsumptionActivePower': -100 })).consumptionPower,
+    0,
+  );
+  assert.equal(
+    parseValues(edgeValues({ '_sum/ProductionActivePower': -101 })).productionPower,
+    undefined,
+  );
+  assert.equal(parseValues(edgeValues()).version, '2026.7.2');
+});

@@ -69,14 +69,20 @@ export function createFileStore(file = DEFAULT_STATE_FILE) {
 }
 
 /** The same in memory (tests). `unreadable`: load() says so. */
-export function createMemoryStore(initial = {}, { unreadable = false, failSave = false } = {}) {
+export function createMemoryStore(
+  initial = {},
+  { unreadable = false, failSave = false, slow = false } = {},
+) {
   let data = structuredClone(initial);
   let saves = 0;
   const store = {
     unreadable,
     failSave,
+    slow,
     load: () => (store.unreadable ? { unreadable: true } : { data: structuredClone(data) }),
     async save(next) {
+      // `slow`: a few turns of the event loop, so that unserialized jobs would interleave.
+      if (store.slow) for (let i = 0; i < 5; i += 1) await new Promise((r) => setImmediate(r));
       if (store.failSave) throw Object.assign(new Error('EIO'), { code: 'EIO' });
       saves += 1;
       data = structuredClone(next);

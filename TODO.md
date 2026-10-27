@@ -11,11 +11,11 @@
 
 ## To confirm on a real system (built without one)
 
-- [ ] The log-in answer of the Edge on port 8085: `edges[0].id` ("0"?),
-      `version`, `role` (ha_openems reads them from `getEdges`; we take them
-      from the log-in answer, else edge "0", no version, no role).
+- [ ] The log-in answer of the Edge on port 8085 (OpenEMS `develop`:
+      `edges: []`, the role in `user.globalRole`; edge id "0"); the version
+      from `_meta/Version`.
 - [ ] That `subscribeEdges` is accepted by the Edge (ha_openems sends it in
-      direct mode); an error answer is ignored, no answer ends the read.
+      direct mode); an error answer, or no answer within 2 s, is ignored.
 - [ ] That a guest (password "user" on a FEMS) may subscribe to `_sum/*` and
       `_host/Hostname`, and that a channel missing on an older Edge does not
       refuse the whole subscription (then: "denied" in the status).
@@ -28,8 +28,9 @@
       and the value back to normal ends the hold by itself.
 - [ ] Port 80 with path `/websocket` (FEMS web server) as ha_openems "local
       FEMS"; port 8082 (OpenEMS UI backend) is not handled differently.
-- [ ] That a log-in every 30 s (one session per read) is fine for the Edge
-      (ha_openems keeps one session open).
+- [ ] `authenticateWithToken` on a real Edge (review r1: OpenEMS keeps
+      every token of `authenticateWithPassword` until a restart; we reuse the
+      first one).
 
 ## Decisions
 
@@ -103,6 +104,16 @@
 - **States per minute**: a sliding budget of 270 states over 60 s.
 - **No custom identity**: no User-Agent of an app, the log-in is the one of
   the API. No Bluetooth, no network discovery.
+
+- **Review r1** (2026-10-27): the guards run on the session clock (wall at
+  the start + monotonic elapsed), dates loaded from /data or Gladys clamped
+  to it; any error ends the session at once; the token of the first log-in
+  reused by `authenticateWithToken` (memory only; an unknown token is
+  forgotten and the password sent in the same session, only that answer can
+  be a refusal); `subscribeEdges` waits 2 s at most; role from
+  `user.globalRole`, version from `_meta/Version`; grid mode 3 (off-grid with
+  genset); production and house powers down to -100 W shown as 0; the old host
+  name never said to answer when none is readable.
 
 ## Ideas
 

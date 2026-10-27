@@ -1,7 +1,10 @@
 // -----------------------------------------------------------------------------
 // A fake OpenEMS Edge: a real WebSocket server on 127.0.0.1 (a free port),
-// speaking the JSON-RPC of Controller.Api.Websocket as ha_openems uses it:
-// `authenticateWithPassword` (error 1003 on a wrong password),
+// speaking the JSON-RPC of Controller.Api.Websocket as OpenEMS `develop`
+// answers it: `authenticateWithPassword` (a new token each time, kept until
+// a restart; error 1003 on a wrong password), `authenticateWithToken` (1003 on
+// an unknown token), the log-in answer with `edges: []` and the role in
+// `user.globalRole`,
 // `subscribeEdges`, `edgeRpc` → `subscribeChannels`, then `currentData`
 // notifications in `edgeRpc` envelopes. Records the connections, the open
 // sockets at once and the requests. Never leaves the loopback.
@@ -13,6 +16,7 @@ import { wsServer } from '../kit/ws.mjs';
 export function edgeValues(overrides = {}) {
   return {
     '_host/Hostname': 'fems12345',
+    '_meta/Version': '2026.7.2',
     '_sum/EssSoc': 77,
     '_sum/EssActivePower': -1500,
     '_sum/GridActivePower': -320,
@@ -41,13 +45,25 @@ export async function startFakeEdge(options = {}) {
   const o = {
     password: 'user',
     role: 'guest',
-    version: '2026.7.2',
     edgeId: '0',
     values: () => edgeValues(),
     latencyMs: 0,
     ...options,
   };
-  const record = { requests: [], open: 0, maxOpen: 0, logins: 0 };
+  const record = {
+    requests: [],
+    open: 0,
+    maxOpen: 0,
+    logins: 0,
+    tokenLogins: 0,
+    tokens: new Set(),
+  };
+  let next = 0;
+  const loginResult = (token) => ({
+    token,
+    user: { id: 'guest', name: 'Guest', globalRole: o.role, hasMultipleEdges: false },
+    edges: [],
+  });
   const later = (fn) => (o.latencyMs > 0 ? setTimeout(fn, o.latencyMs) : setImmediate(fn));
   const answer = (client, body) => later(() => client.readyState === 1 && srv.send(client, body));
   const push = (client, edgeId, params) =>
@@ -79,11 +95,14 @@ export async function startFakeEdge(options = {}) {
         if (o.onLogin === 'notJsonrpc') return void answer(client, { id: m.id, result: {} });
         if (o.onLogin === 'error') return void error(1001);
         if (m.params?.password !== o.password) return void error(1003);
-        return void ok({
-          token: 'tok',
-          user: { id: 'guest', name: 'Guest', hasMultipleEdges: false },
-          edges: [{ id: o.edgeId, version: o.version, role: o.role, isOnline: true }],
-        });
+        const token = `tok-${(next += 1)}`;
+        record.tokens.add(token);
+        return void ok(loginResult(token));
+      }
+      if (m.method === 'authenticateWithToken') {
+        record.tokenLogins += 1;
+        if (!record.tokens.has(m.params?.token)) return void error(1003);
+        return void ok(loginResult(m.params.token));
       }
       if (m.method === 'subscribeEdges') {
         if (o.subscribeEdges === 'silent') return undefined;
@@ -92,6 +111,9 @@ export async function startFakeEdge(options = {}) {
       if (m.method === 'edgeRpc' && m.params?.payload?.method === 'subscribeChannels') {
         const inner = m.params.payload;
         if (o.subscribe === 'silent') return undefined;
+        if (o.subscribe === 'otherId') {
+          return void ok({ payload: { jsonrpc: '2.0', id: 'other', result: {} } });
+        }
         if (o.subscribe === 'error') {
           return void ok({
             payload: { jsonrpc: '2.0', id: inner.id, error: { code: 1002, message: 'no' } },

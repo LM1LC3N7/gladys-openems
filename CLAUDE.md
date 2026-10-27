@@ -55,7 +55,8 @@ test/helpers/fakeEdge.js          a fake Edge on a real WebSocket server
 ## Rules
 
 - **Read-only.** No `onSetValue`; the client sends only
-  `authenticateWithPassword`, `subscribeEdges` and `subscribeChannels`. A
+  `authenticateWithPassword`, `authenticateWithToken` (the token in memory
+  only), `subscribeEdges` and `subscribeChannels`. A
   command, if one is ever added, is a `button` disabled by default behind an
   option, never a `switch`.
 - **Secrets**: the password only goes into the log-in request to the

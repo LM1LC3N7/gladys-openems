@@ -20,3 +20,6 @@ the notes of the version's GitHub Release.
 - A guard on every lifetime counter: never 0, a drop or a jump held back and
   said in the status, taken only by "Accept the held counter" clicked twice.
 - A refused password stops the reads until new fields or a test click.
+- The password is sent once: the next reads log in with the token of the Edge
+  (memory only), so the Edge does not keep one token per read.
+- Grid mode 3 (off-grid with a genset).

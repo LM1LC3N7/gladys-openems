@@ -188,7 +188,7 @@ export const T = {
           fr: `Cliquez de nouveau sur « Accepter le compteur retenu », après quelques secondes et dans les ${delay(within).fr}, pour les accepter ; n’acceptez que si c’est réel.`,
         },
       ]),
-    done: (accepted, changed) =>
+    done: (accepted, changed, stillHeld) =>
       both([
         ...accepted.map((h) => ({
           en: `Accepted: ${COUNTER_NAMES[h.name].en} ${kwh(h.to)} kWh, sent at the next read.`,
@@ -202,7 +202,9 @@ export const T = {
               },
             ]
           : []),
-        { en: 'A different value stays held.', fr: 'Une autre valeur reste retenue.' },
+        ...(stillHeld
+          ? [{ en: 'A different value stays held.', fr: 'Une autre valeur reste retenue.' }]
+          : []),
       ]),
   },
   test: {

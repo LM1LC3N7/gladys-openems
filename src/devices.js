@@ -160,9 +160,13 @@ export const CATALOG = [
     max: 3,
   }),
   def(FEATURE.GRID_MODE, 'gridMode', 0, {
-    ...measure('Grid mode (1 on-grid, 2 off-grid)', C.UNKNOWN, T.SENSOR.INTEGER),
+    ...measure(
+      'Grid mode (1 on-grid, 2 off-grid, 3 off-grid with genset)',
+      C.UNKNOWN,
+      T.SENSOR.INTEGER,
+    ),
     min: 1,
-    max: 2,
+    max: 3,
   }),
 ];
 

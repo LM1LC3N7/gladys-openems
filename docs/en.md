@@ -20,7 +20,7 @@ One device per Edge, named after its host name (e.g. `OpenEMS fems12345`):
 - the lifetime energy counters (kWh): production, house consumption, bought
   from the grid, sold to the grid, battery charge and discharge;
 - the system state (0 OK, 1 info, 2 warning, 3 fault) and the grid mode
-  (1 on-grid, 2 off-grid);
+  (1 on-grid, 2 off-grid, 3 off-grid with a genset);
 - a **production index** for the Gladys energy monitoring (option
   "Production").
 
@@ -48,7 +48,10 @@ not counted by the energy monitoring: your main meter already counts them
 ## How it reads
 
 Each read opens one connection to the Edge, logs in, subscribes to the values,
-takes the first values the Edge sends, and closes. One connection at a time,
+takes the first values the Edge sends, and closes. The password is sent once:
+the next reads log in with the token the Edge gave (kept in memory only, never
+in the logs nor in `/data`), so the Edge does not pile up one token per read;
+after a restart of the Edge or of the integration, the password is sent again. One connection at a time,
 never faster than the interval: not on the test button, not on Discovery, not
 on a reconnection, not after a restart of the container (it waits the interval
 plus one minute after the last session). A new address or a new password is
@@ -69,7 +72,9 @@ A lifetime counter only rises. Every counter goes through a guard:
 - 0, a missing value or a text is never published;
 - a **drop** (a reset, a replaced meter) or a **jump** of more than 100 kW on
   average (plus 0.5 kWh) since the last value is **held back**: the last accepted value is
-  sent again, the status shows it, and time never confirms it;
+  sent again, the status shows it, and time never confirms it (the guard runs
+  on the elapsed time of the integration, so a clock corrected by hours changes
+  nothing);
 - if it is right, click **Accept the held counter** twice (the first click
   lists, the second, from 3 s to 5 min later, accepts exactly what was
   listed). After a drop is accepted, counting goes on from the new value; the

@@ -14,7 +14,9 @@ import { edgeValues, startFakeEdge } from './helpers/fakeEdge.js';
 const PASSWORD = 'user';
 /** Short delays: a silent Edge ends a read in 0.3 s instead of 8 s. */
 const client = () =>
-  new OpenemsClient({ timeouts: { connect: 1000, answer: 300, data: 300, session: 3000 } });
+  new OpenemsClient({
+    timeouts: { connect: 1000, answer: 300, data: 300, session: 3000, secondary: 200 },
+  });
 
 async function edge(t, options) {
   const fake = await startFakeEdge(options);
@@ -51,6 +53,11 @@ test('the Edge of a log-in answer: id, version and role, checked', () => {
     role: 'guest',
   });
   assert.deepEqual(edgeOf({}), { id: '0', version: undefined, role: undefined });
+  assert.deepEqual(edgeOf({ user: { globalRole: 'OWNER' }, edges: [] }), {
+    id: '0',
+    version: undefined,
+    role: 'owner',
+  });
   assert.deepEqual(edgeOf({ edges: [{ id: 'a b', version: '<x>', role: 'root' }] }), {
     id: '0',
     version: undefined,
@@ -62,7 +69,10 @@ test('a read: log-in, subscribeEdges, subscribeChannels, the first data, closed'
   const fake = await edge(t);
   const reader = client();
   const answer = await reader.read(creds(fake));
-  assert.deepEqual(answer.edge, { id: '0', version: '2026.7.2', role: 'guest' });
+  // An Edge answers `edges: []` and its role in user.globalRole; the version is a channel.
+  assert.deepEqual(answer.edge, { id: '0', version: undefined, role: 'guest' });
+  assert.equal(answer.params['_meta/Version'], '2026.7.2');
+  assert.equal('token' in answer, false, 'the token never leaves the client');
   assert.equal(answer.params['_sum/EssSoc'], 77);
   assert.equal(answer.params['_host/Hostname'], 'fems12345');
   assert.deepEqual(
@@ -181,4 +191,49 @@ test('one session at a time: a second read is "busy"; abort cuts the first', asy
   fake.options.data = undefined;
   const answer = await reader.read(creds(fake));
   assert.deepEqual(answer.params['_sum/EssSoc'], edgeValues()['_sum/EssSoc']);
+});
+
+test('one password log-in for N reads: the token is reused, a forgotten one is no refusal', async (t) => {
+  const fake = await edge(t);
+  const reader = client();
+  for (let i = 0; i < 5; i += 1) await reader.read(creds(fake));
+  assert.equal(fake.record.logins, 1);
+  assert.equal(fake.record.tokenLogins, 4);
+  assert.equal(fake.record.tokens.size, 1, 'one token kept by the Edge, not one per read');
+  // The Edge restarted: the token is unknown, the password goes in the same session.
+  fake.record.tokens.clear();
+  const answer = await reader.read(creds(fake));
+  assert.equal(answer.params['_sum/EssSoc'], 77);
+  assert.equal(fake.record.logins, 2);
+  // Another password: never the token of the old one.
+  assert.equal(await codeOf(reader.read(creds(fake, 'wrong'))), 'refused');
+  assert.equal(fake.record.logins, 3);
+  const last = fake.record.requests.at(-1);
+  assert.equal(last.method, 'authenticateWithPassword');
+});
+
+test('a refusal ends the session at once, with the default delays (no 25 s wait)', async (t) => {
+  const fake = await edge(t);
+  const started = performance.now();
+  assert.equal(await codeOf(new OpenemsClient().read(creds(fake, 'wrong'))), 'refused');
+  assert.ok(performance.now() - started < 2_000, `${performance.now() - started} ms`);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(fake.record.open, 0, 'socket closed');
+  const denied = await edge(t, { subscribe: 'error' });
+  const at = performance.now();
+  assert.equal(await codeOf(new OpenemsClient().read(creds(denied))), 'denied');
+  assert.ok(performance.now() - at < 2_000);
+});
+
+test('subscribeEdges without answer: the read goes on after the short delay', async (t) => {
+  const fake = await edge(t, { subscribeEdges: 'silent' });
+  const started = performance.now();
+  const answer = await client().read(creds(fake));
+  assert.equal(answer.params['_sum/EssSoc'], 77);
+  assert.ok(performance.now() - started < 1_000);
+});
+
+test('an edgeRpc answer whose inner id is not ours is "protocol"', async (t) => {
+  const fake = await edge(t, { subscribe: 'otherId' });
+  assert.equal(await codeOf(client().read(creds(fake))), 'protocol');
 });
