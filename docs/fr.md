@@ -1,67 +1,101 @@
-# Template de démonstration
+# FENECON FEMS / OpenEMS
 
-Ceci est la documentation utilisateur de l'intégration. Gladys ré-héberge ce
-fichier et affiche un lien **Documentation** permanent vers lui dans l'écran
-de configuration (dans la langue de l'utilisateur, avec l'anglais en repli) —
-c'est au moment de configurer que l'utilisateur en a le plus besoin. Gardez
-les courtes indications d'accueil dans les blocs `section` du `config_schema`
-du manifest ; mettez ici le pas-à-pas détaillé (captures d'écran, dépannage…).
+Intégration non officielle, sans lien avec FENECON ni l'association OpenEMS.
+Elle lit un système de stockage **FENECON FEMS** (Home, Commercial) ou tout
+**Edge OpenEMS** sur votre réseau, par l'API locale JSON-RPC WebSocket de
+l'Edge. **Lecture seule** : elle ne change jamais un réglage du système. Sans
+cloud : le portail FENECON n'est jamais contacté.
+
+**Jamais testé avec un vrai appareil** : construite à partir de l'API telle
+que l'utilise l'intégration Home Assistant ha_openems. Vos retours sont les
+bienvenus.
 
 ## Ce que vous obtenez
 
-Six appareils de démonstration apparaissent après l'installation : une
-station météo (vraies données Open-Meteo), un interrupteur, une lampe
-variable, une prise connectée avec mesure de puissance, un détecteur de
-mouvement et une caméra.
+Un appareil par Edge, nommé d'après son nom d'hôte (ex. `OpenEMS fems12345`) :
+
+- état de charge (%) ;
+- puissance de la batterie (W, signée : + décharge, - charge) ;
+- puissance réseau (W, signée : + achetée au réseau, - vendue au réseau) ;
+- puissance de production (W) et consommation de la maison (W) ;
+- les compteurs d'énergie à vie (kWh) : production, consommation de la
+  maison, achat au réseau, vente au réseau, charge et décharge de la
+  batterie ;
+- l'état du système (0 OK, 1 info, 2 avertissement, 3 défaut) et le mode
+  réseau (1 raccordé, 2 îloté) ;
+- un **index de production** pour le suivi énergétique de Gladys (option
+  « Production »).
+
+La consommation de la maison et l'achat au réseau sont des capteurs simples,
+non comptés par le suivi énergétique : votre compteur principal les compte
+déjà (ils seraient facturés deux fois).
 
 ## Configuration
 
-1. Ouvrez l'onglet **Configuration** de l'intégration.
-2. Renseignez la **latitude** et la **longitude** que la station météo de
-   démonstration doit observer (Paris par défaut), et choisissez votre unité
-   de température. L'**intervalle de rafraîchissement** règle la fréquence
-   de lecture de la station météo et de la puissance de la prise : toutes
-   les 5 minutes par défaut, toutes les minutes au plus.
-3. Enregistrez : les appareils apparaissent dans l'onglet **Découverte**,
-   prêts à être ajoutés.
+1. Donnez à l'Edge une adresse fixe dans votre box.
+2. Dans Gladys, installez l'intégration et remplissez :
+   - **Adresse de l'Edge** : son adresse IP ; ajoutez un port seulement s'il
+     n'est pas 8085 (`:80` passe par le WebSocket de la page web du FEMS) ;
+   - **Identifiant** : laissez `x` (l'Edge reconnaît l'utilisateur par le mot
+     de passe) ;
+   - **Mot de passe** : l'invité en lecture seule suffit ; sur un FEMS, son mot
+     de passe est en général `user`. L'état le signale quand le mot de passe
+     se connecte avec plus de droits ;
+   - **Production** : « Suivi énergétique » (la production va au suivi
+     énergétique sous forme d'index) ou « Capteur seulement » (une autre
+     intégration envoie déjà cette production à Gladys). À choisir avant de
+     créer l'appareil ;
+   - **Intervalle de lecture** : 30 s par défaut (30 à 300).
+3. Cliquez sur **Tester la connexion**, puis créez l'appareil depuis l'onglet
+   **Découverte**.
 
-Le réglage **Préférer la connexion locale** pilote la prise de
-démonstration : elle affiche en badge le canal réellement utilisé (local ou
-cloud), avec un point orange quand elle fonctionne en mode dégradé (local
-refusé, bascule cloud).
+## Comment il lit
 
-## Actions
+Chaque lecture ouvre une connexion à l'Edge, se connecte, s'abonne aux
+valeurs, prend les premières valeurs envoyées par l'Edge, et ferme. Une
+connexion à la fois, jamais plus vite que l'intervalle : ni au bouton de test,
+ni à la Découverte, ni à une reconnexion, ni après un redémarrage du conteneur
+(il attend l'intervalle plus une minute après la dernière session). Une
+nouvelle adresse ou un nouveau mot de passe est lu tout de suite.
 
-- **Tester le fournisseur météo** — effectue une requête en direct vers
-  Open-Meteo et affiche la température et l'humidité actuelles sous le
-  bouton.
-- **Identifier un appareil** — choisissez un de vos appareils dans la liste
-  et il se signale (la lampe de démonstration « clignote » dans les logs).
+- **Mot de passe refusé** (l'Edge répond « authentification échouée ») : les
+  lectures s'arrêtent jusqu'à l'enregistrement d'un nouveau mot de passe ou un
+  clic sur **Tester la connexion** (un essai par clic). Une connexion fermée,
+  une absence de réponse ou une autre erreur n'est pas un refus : nouvel essai
+  après 1 min, puis jusqu'à toutes les 15 min.
+- **Identité** : les valeurs ne vont qu'à l'appareil du nom d'hôte lu dans la
+  même session. Sans nom d'hôte lisible, rien n'est publié ; un autre nom
+  d'hôte à la même adresse a son propre appareil.
 
-## Scènes
+## Compteurs à vie
 
-L'intégration ajoute ses propres cartes à l'éditeur de scènes (Gladys 5.1
-ou plus récent), dans la catégorie **Intégrations** :
+Un compteur à vie ne fait que monter. Chaque compteur passe par une garde :
 
-- **Mouvement détecté** (déclencheur) — lance la scène quand un détecteur
-  de démonstration voit bouger quelque chose. Choisissez éventuellement le
-  détecteur et ce qui a bougé (personne, animal) ; laissés vides, toute
-  détection correspond. Les actions suivantes peuvent lire ce qui a bougé
-  avec `{{triggerEvent.data.target}}`.
-- **Identifier un appareil** (action) — fait se signaler l'appareil choisi.
-  Elle indique si l'appareil a pu se signaler, pour que les actions
-  suivantes puissent en dépendre.
+- 0, une valeur manquante ou un texte n'est jamais publié ;
+- une **baisse** (remise à zéro, compteur remplacé) ou un **saut** de plus de
+  100 kW en moyenne (plus 0,5 kWh) depuis la dernière valeur est **retenu** : la dernière
+  valeur acceptée est renvoyée, l'état l'affiche, et le temps ne le confirme
+  jamais ;
+- s'il est juste, cliquez deux fois sur **Accepter le compteur retenu** (le
+  premier clic liste, le second, de 3 s à 5 min plus tard, accepte exactement
+  ce qui a été listé). Après une baisse acceptée, le comptage reprend à la
+  nouvelle valeur ; le suivi énergétique ne compte rien pour la baisse.
+  Enregistrer la configuration n'accepte rien.
 
-## Tableau de bord
+## Confidentialité et sécurité
 
-Ajoutez le widget **État de la démo** à un tableau de bord : il affiche en
-direct la température de la station météo et la puissance de la prise du
-bureau, la connexion utilisée par la prise (en orange si dégradée) et la
-position observée. Son bouton **Identifier la lampe** fait se signaler la
-lampe de démonstration.
+Le mot de passe est gardé par Gladys dans sa base, jamais réaffiché, envoyé
+seulement à l'Edge sur votre réseau, dans la requête de connexion. Il n'est
+jamais écrit dans les journaux, dans `/data` ni dans un état. Après un mot de
+passe refusé, `/data` garde une empreinte salée de 8 bits (pour voir après un
+redémarrage si le formulaire a changé), effacée à la connexion réussie
+suivante. La connexion est un WebSocket simple sur votre réseau, comme celui
+de la page web du FEMS.
 
-## Dépannage
+## Limites
 
-L'intégration journalise tout ce qu'elle fait : consultez les logs de
-l'intégration depuis l'interface Gladys (ou `docker logs` sur l'hôte) avec
-`LOG_LEVEL=debug` pour le détail complet.
+- Un Edge par intégration.
+- Aucune commande : limites de charge, borne de recharge et réglages de l'Edge
+  ne sont pas disponibles (peut-être plus tard, derrière une option).
+- Les signes des puissances batterie et réseau sont ceux que documente
+  OpenEMS ; pas encore vérifiés sur un vrai système.
