@@ -11,7 +11,11 @@
 // restart, so one per read would pile up (review r1, I3). The token lives in
 // memory only (never logged, never in /data), bound to the address, user name
 // and password; a token the Edge no longer knows is forgotten and the
-// password sent in the same session (only THAT answer can be a refusal). Any
+// password sent in the same session (only THAT answer can be a refusal). A
+// log-in by token without answer, or closed, fails that read: the token is
+// forgotten and the next reads send the password for 5 min, doubled at each
+// such abandon in a row up to 6 h, before a token is tried again (memory only,
+// on the monotonic clock of this process; review r3, m-r3-3). Any
 // error ends the session at once, socket closed (review r1, I2). One
 // request in flight at a time (each answer awaited before the next request).
 // Only the answer with the id of our request is taken; the data only from a
@@ -40,6 +44,8 @@ import {
   MAX_MESSAGES,
   SECONDARY_TIMEOUT,
   SESSION_TIMEOUT,
+  TOKEN_PAUSE_FIRST,
+  TOKEN_PAUSE_MAX,
 } from '../constants.js';
 import { CHANNELS, hasUsefulValue, versionOf } from './model.js';
 
@@ -100,9 +106,17 @@ const keyOf = ({ host, port, username, password }) =>
     .digest('hex');
 
 export class OpenemsClient {
-  /** `timeouts`: shorter delays for the tests (`connect`, `answer`, `data`, `session`, ms). */
-  constructor({ WebSocketImpl = WebSocket, timeouts = {} } = {}) {
+  /**
+   * `timeouts`: shorter delays for the tests (`connect`, `answer`, `data`,
+   * `session`, ms); `monotonic`: the clock of the token pause (the app's).
+   */
+  constructor({
+    WebSocketImpl = WebSocket,
+    timeouts = {},
+    monotonic = () => performance.now(),
+  } = {}) {
     this.WebSocketImpl = WebSocketImpl;
+    this.monotonic = monotonic;
     this.timeouts = {
       connect: CONNECT_TIMEOUT,
       answer: ANSWER_TIMEOUT,
@@ -114,6 +128,13 @@ export class OpenemsClient {
     this.session = undefined;
     /** The token of the Edge, memory only: `{ key, token }`. */
     this.token = undefined;
+    /**
+     * Log-ins by token abandoned in a row (no answer, closed) and the
+     * monotonic deadline (this process) before which the password is sent
+     * instead of a token; `undefined`: no pause.
+     */
+    this.tokenAbandons = 0;
+    this.tokenPauseUntil = undefined;
   }
 
   /** Ends the session running, if any (a stop of the integration). */
@@ -130,7 +151,8 @@ export class OpenemsClient {
       throw new OpenemsError('busy');
     }
     const key = keyOf({ host, port, username, password });
-    const token = this.token?.key === key ? this.token.token : undefined;
+    const paused = this.tokenPauseUntil !== undefined && this.monotonic() < this.tokenPauseUntil;
+    const token = !paused && this.token?.key === key ? this.token.token : undefined;
     const session = new Session(this.WebSocketImpl, urlOf({ host, port }), this.timeouts);
     this.session = session;
     try {
@@ -146,8 +168,19 @@ export class OpenemsClient {
       if (session.tokenRejected || session.tokenPending || err?.code === 'refused') {
         this.token = undefined;
       }
+      if (session.tokenPending && err?.code !== 'aborted') {
+        // Abandoned by the Edge (a stop of the integration is not): the
+        // password for a bounded time before a token again, never a read in
+        // two failing (review r3, m-r3-3).
+        this.tokenAbandons += 1;
+        this.tokenPauseUntil =
+          this.monotonic() +
+          Math.min(TOKEN_PAUSE_FIRST * 2 ** (this.tokenAbandons - 1), TOKEN_PAUSE_MAX);
+      }
       throw err;
     } finally {
+      // The Edge answered a token (accepted or not): it does answer them.
+      if (session.tokenAnswered) this.tokenAbandons = 0;
       await session.closed;
       this.session = undefined;
     }
@@ -355,6 +388,7 @@ class Session {
       this.tokenPending = true;
       login = await this.call(request('authenticateWithToken', { token }));
       this.tokenPending = false;
+      this.tokenAnswered = true;
       if (login.error || !isObject(login.result)) {
         // Unknown to the Edge (restarted, cleared): forgotten, never a refusal.
         this.tokenRejected = true;

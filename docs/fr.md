@@ -56,7 +56,10 @@ valeurs, prend les premières valeurs envoyées par l'Edge, et ferme. Le mot de
 passe n'est envoyé qu'une fois : les lectures suivantes se connectent avec le
 jeton donné par l'Edge (gardé en mémoire seulement, ni dans les journaux ni
 dans `/data`), pour que l'Edge n'empile pas un jeton par lecture ; après un
-redémarrage de l'Edge ou de l'intégration, le mot de passe est renvoyé. Une
+redémarrage de l'Edge ou de l'intégration, le mot de passe est renvoyé. Si
+l'Edge ne répond pas à une connexion par jeton, ou ferme la connexion dessus,
+cette lecture échoue et les suivantes envoient le mot de passe pendant 5 min
+(puis 10, 20… jusqu'à 6 h si cela continue) avant un nouvel essai du jeton. Une
 connexion à la fois, jamais plus vite que l'intervalle : ni au bouton de test,
 ni à la Découverte, ni à une reconnexion, ni après un redémarrage du conteneur
 (il attend l'intervalle plus une minute après la dernière session). Une
@@ -82,7 +85,10 @@ Un compteur à vie ne fait que monter. Chaque compteur passe par une garde :
   jamais (la garde compte le temps écoulé de l'intégration : une horloge
   corrigée de plusieurs heures pendant qu'elle tourne n'y change rien ; à son
   redémarrage, elle repart de l'heure du système, et une date enregistrée dans
-  le futur est ramenée à maintenant) ;
+  le futur est ramenée à maintenant ; une heure du système fausse de plusieurs
+  heures autour d'un redémarrage, jamais corrigée pendant la marche d'avant ou
+  avancée à tort après le redémarrage et avant la première valeur lue, peut
+  élargir la marge de cette seule première valeur) ;
 - s'il est juste, cliquez deux fois sur **Accepter le compteur retenu** (le
   premier clic liste, le second, de 3 s à 5 min plus tard, accepte exactement
   ce qui a été listé). Après une baisse acceptée, le comptage reprend à la

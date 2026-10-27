@@ -250,3 +250,104 @@ test('a log-in by token without answer, or closed: the token forgotten, the pass
     assert.equal(fake.record.tokenLogins, 1, tokenLogin);
   }
 });
+
+const MINUTE = 60_000;
+
+/** A client on a monotonic clock the test moves (`at.ms`). */
+const pacedClient = (at) =>
+  new OpenemsClient({
+    timeouts: { connect: 1000, answer: 300, data: 300, session: 3000, secondary: 200 },
+    monotonic: () => at.ms,
+  });
+
+test('m-r3-3: a token never answered: the password for 5 min, then the token again, never a read in two failing', async (t) => {
+  for (const tokenLogin of ['silent', 'close']) {
+    const fake = await edge(t);
+    const at = { ms: 1_000 };
+    const reader = pacedClient(at);
+    await reader.read(creds(fake));
+    fake.options.tokenLogin = tokenLogin;
+    assert.notEqual(await codeOf(reader.read(creds(fake))), 'resolved', tokenLogin);
+    // Every 30 s for 5 min: the password, each read a success.
+    for (let i = 0; i < 9; i += 1) {
+      at.ms += 30_000;
+      assert.equal(await codeOf(reader.read(creds(fake))), 'resolved', `${tokenLogin} ${i}`);
+    }
+    assert.equal(fake.record.tokenLogins, 1, tokenLogin);
+    // 5 min after the abandon: the token is tried again.
+    at.ms += 31_000;
+    assert.notEqual(await codeOf(reader.read(creds(fake))), 'resolved', tokenLogin);
+    assert.equal(fake.record.tokenLogins, 2, tokenLogin);
+  }
+});
+
+test('m-r3-3: the pause doubles at each abandon in a row up to 6 h, and ends when the Edge answers a token', async (t) => {
+  const fake = await edge(t);
+  const at = { ms: 1_000 };
+  const reader = pacedClient(at);
+  await reader.read(creds(fake));
+  fake.options.tokenLogin = 'close';
+  const pauses = [5, 10, 20, 40, 80, 160, 320, 360, 360].map((m) => m * MINUTE);
+  for (const [i, pause] of pauses.entries()) {
+    const tokenLogins = fake.record.tokenLogins;
+    assert.equal(await codeOf(reader.read(creds(fake))), 'closed', `abandon ${i + 1}`);
+    assert.equal(fake.record.tokenLogins, tokenLogins + 1);
+    // At once the password (a new token kept), and still just before the end of the pause.
+    at.ms += 1_000;
+    assert.equal(await codeOf(reader.read(creds(fake))), 'resolved', `pause ${i + 1}`);
+    at.ms += pause - 2_000;
+    assert.equal(await codeOf(reader.read(creds(fake))), 'resolved', `end of pause ${i + 1}`);
+    assert.equal(fake.record.tokenLogins, tokenLogins + 1, `pause ${i + 1}: no token`);
+    // Just after it, the token is tried again (the next abandon).
+    at.ms += 2_000;
+  }
+  // The Edge answers tokens again: the abandons in a row start afresh.
+  fake.options.tokenLogin = undefined;
+  assert.equal(await codeOf(reader.read(creds(fake))), 'resolved');
+  fake.options.tokenLogin = 'close';
+  assert.equal(await codeOf(reader.read(creds(fake))), 'closed');
+  fake.options.tokenLogin = undefined;
+  at.ms += 4 * MINUTE;
+  assert.equal(await codeOf(reader.read(creds(fake))), 'resolved', 'the password (a new token)');
+  const logins = fake.record.logins;
+  const tokenLogins = fake.record.tokenLogins;
+  at.ms += MINUTE + 1_000;
+  assert.equal(await codeOf(reader.read(creds(fake))), 'resolved');
+  assert.equal(fake.record.tokenLogins, tokenLogins + 1, 'a token 5 min after, as at first');
+  assert.equal(fake.record.logins, logins, 'no password');
+});
+
+test('m-r3-3: a stop during the log-in by token is no abandon: the token is used again at once', async (t) => {
+  const fake = await edge(t, { tokenLogin: undefined });
+  const at = { ms: 1_000 };
+  const reader = pacedClient(at);
+  await reader.read(creds(fake));
+  fake.options.tokenLogin = 'silent';
+  const pending = reader.read(creds(fake));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  reader.abort();
+  assert.equal(await codeOf(pending), 'aborted');
+  fake.options.tokenLogin = undefined;
+  // The token went with the stop (review r2, m-r2-1): the password once, then a token.
+  const logins = fake.record.logins;
+  await reader.read(creds(fake));
+  assert.equal(fake.record.logins, logins + 1, 'the password after the stop');
+  const tokenLogins = fake.record.tokenLogins;
+  at.ms += 30_000;
+  await reader.read(creds(fake));
+  assert.equal(fake.record.tokenLogins, tokenLogins + 1);
+});
+
+test('m-r3-3: after the pause, an abandoned token is never tried again (it was forgotten)', async (t) => {
+  const fake = await edge(t);
+  const at = { ms: 1_000 };
+  const reader = pacedClient(at);
+  await reader.read(creds(fake));
+  fake.options.tokenLogin = 'silent';
+  assert.equal(await codeOf(reader.read(creds(fake))), 'timeout');
+  // No read during the pause: the next one, after it, sends the password.
+  at.ms += 6 * MINUTE;
+  assert.equal(await codeOf(reader.read(creds(fake))), 'resolved');
+  assert.equal(fake.record.tokenLogins, 1);
+  assert.equal(fake.record.logins, 2);
+});

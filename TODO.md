@@ -92,7 +92,8 @@
   5 s; nothing reads sooner than the last session + the interval (monotonic):
   not the test button, Discovery, a (re)connection, a save of an unchanged
   form, a restart (the instant written to `/data` before the session, at
-  most once a minute; after a restart: that instant + 1 min + the interval).
+  most once a minute; after a restart: that instant + 1 min + the interval,
+  turned at load into a deadline on the monotonic clock of the new process).
   Failures: 1 min (or the interval), doubled up to 15 min.
 - **`getConfig()` failing in `connected`**: asked again after 5 s, 15 s,
   30 s, then every minute, without end, with a status (lot 17).
@@ -120,9 +121,30 @@
   read back onto the session clock then capped at it; a log-in by token that
   fails in any way (no answer, closed) forgets the token, the next read sends
   the password; the wait after a restart is a monotonic deadline taken at
-  load. Left: a life that starts with a wrong wall clock (before NTP) and
-  never sees it corrected writes wrong dates; the next life caps a future one
-  and only its first read can see a wider margin.
+  load.
+
+- **Review r3** (2026-10-27): the wait after a restart is an explicit
+  monotonic deadline of the new process (its monotonic clock starts near 0:
+  the deadline is often below 0, never told by its sign; `undefined` = no
+  wait), so a container restarting in a loop reads once per interval + 1 min
+  (the r2 fix read at each restart, one token left on the Edge each time). No
+  other monotonic instant crosses a restart. A log-in by token without answer
+  or closed: the password for 5 min, doubled at each such abandon in a row up
+  to 6 h, then the token again (memory only; a stop of the integration is no
+  abandon; an answer to a token starts the count afresh).
+
+- **Left, the wall clock across lives** (no fix possible from the wall
+  clock alone, the only clock that crosses a restart):
+  - a life that starts with a wrong wall clock (before NTP) and never sees it
+    corrected writes wrong dates; the next life caps a future one and only
+    its first read can see a wider margin;
+  - the wall clock wrongly set hours ahead between the start of a life and
+    the first load of a guard (its first value read, about 90 s after a
+    restart when the Edge answers):
+    the dates of `/data` look hours old and that first read can let a glitch
+    through (review r3, s16: +900 kWh with 10 h). The integration cannot tell
+    it from NTP correcting a start made before NTP, which it must follow
+    (review r2, m-r2-2); after that read, the session clock holds.
 
 ## Ideas
 

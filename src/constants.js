@@ -59,6 +59,14 @@ export const STATE_HEARTBEAT = 10 * MINUTE;
 /** Unreachable: tried again after 1 min (never faster than a read), doubled up to 15 min. */
 export const RETRY_MIN = MINUTE;
 export const RETRY_MAX = 15 * MINUTE;
+/**
+ * A log-in by token abandoned (no answer, or the connection closed on it):
+ * the next reads send the password for this long, doubled at each abandon in
+ * a row up to TOKEN_PAUSE_MAX, then the token is tried again (review r3,
+ * m-r3-3): an Edge that never answers a token never fails every other read.
+ */
+export const TOKEN_PAUSE_FIRST = 5 * MINUTE;
+export const TOKEN_PAUSE_MAX = 6 * 60 * MINUTE;
 /** getConfig() failed: asked again after 5 s, 15 s, 30 s, then every minute, without end. */
 export const CONFIG_RETRY = [5 * SECOND, 15 * SECOND, 30 * SECOND, MINUTE];
 /** The test button answers within this delay. */

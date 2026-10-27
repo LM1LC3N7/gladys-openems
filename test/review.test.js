@@ -2,7 +2,8 @@
 // The points of review r1, each with a test that fails on the mutant the
 // reviewer found surviving: the session clock of the guards (I1), the real
 // client on a refused password (I2), and M22, M29, M31, M32, M14, M26, M13,
-// M17, M25, m5.
+// M17, M25, m5; then those of r2 (R3, R4, m-r2-2 to m-r2-4) and r3 (the wait
+// after a restart in a NEW process, I-r3-1; N2).
 // -----------------------------------------------------------------------------
 
 import { test } from 'node:test';
@@ -28,9 +29,13 @@ import {
   status,
 } from './helpers/app.js';
 
-/** The test clock with a wall clock that NTP can move (`clock.shift(ms)`), the monotonic one not. */
-function ntpClock() {
-  const base = testClock({ start: START });
+/**
+ * The test clock with a wall clock that NTP can move (`clock.shift(ms)`), the
+ * monotonic one not. A new one is a new process: its monotonic clock starts
+ * at 0 again, its wall clock at `start` (a restarted container).
+ */
+function ntpClock(start = START) {
+  const base = testClock({ start });
   let offset = 0;
   return {
     ...base,
@@ -423,4 +428,143 @@ test('R4 (r2): a hold loaded from /data is dated on the session clock, never the
   await advance(35_000);
   assert.notEqual(last(gladys, 'production_index'), 14145.678);
   await app.stop();
+});
+
+// --- Review r3 ----------------------------------------------------------------------
+// Each life below is a NEW process: a new test clock whose monotonic clock
+// starts at 0 again (as performance.now() in a restarted container), the wall
+// clock going on.
+
+/** Life 1 on `store`: one read at START, then stopped `runMs` later. */
+async function firstLife(store, { runMs = 10_000, ...options } = {}) {
+  const one = await setup({ store, clock: ntpClock(), ...options });
+  await one.app.start(CONFIG);
+  await one.app.idle();
+  assert.equal(one.client.calls.length, 1);
+  await one.advance(runMs);
+  await one.app.stop();
+  return one;
+}
+
+test('I-r3-1: a restart in a new process (monotonic from 0) waits the minute and the interval', async () => {
+  // The new process starts 2 s or 62 s after the stop: the session of life 1
+  // was 12 s or 72 s ago, the read is due 1 min + 30 s after it.
+  for (const gap of [2_000, 62_000]) {
+    const store = createMemoryStore();
+    const one = await firstLife(store);
+    const two = await setup({ store, clock: ntpClock(one.clock.now() + gap) });
+    await two.app.start(CONFIG);
+    await two.app.idle();
+    assert.equal(two.client.calls.length, 0, `${gap}: never at once`);
+    assert.equal(status(two.gladys).connected, true, 'read before: shown connected');
+    assert.match(status(two.gladys).message.en, /next read at/);
+    const due = 90_000 - 10_000 - gap;
+    // The timer looks every 5 s: nothing at the last look before it, a read at the next one.
+    await two.advance(Math.floor(due / 5_000) * 5_000);
+    assert.equal(two.client.calls.length, 0, `${gap}: never before the minute and the interval`);
+    await two.advance(5_000);
+    assert.equal(two.client.calls.length, 1, `${gap}: then read`);
+    await two.app.stop();
+  }
+});
+
+test('I-r3-1: during the wait after a restart, the test button reads nothing; new fields are read at once', async () => {
+  for (const change of [undefined, { password: 'other' }, { address: '192.168.1.61' }]) {
+    const store = createMemoryStore();
+    const one = await firstLife(store);
+    const two = await setup({ store, clock: ntpClock(one.clock.now() + 2_000) });
+    await two.app.start(CONFIG);
+    await two.app.idle();
+    if (!change) {
+      const answer = await two.gladys.fake.action(ACTIONS.TEST);
+      assert.match(answer.data.message.en, /next read possible at 10:01:30 UTC/);
+      assert.equal(two.client.calls.length, 0, 'the test button never reads sooner');
+    } else {
+      await two.app.start({ ...CONFIG, ...change }, { fresh: true });
+      await two.app.idle();
+      assert.equal(two.client.calls.length, 1, `${Object.keys(change)}: read at once`);
+    }
+    await two.app.stop();
+  }
+  // A new process whose configuration has another address: read at once too.
+  const store = createMemoryStore();
+  const one = await firstLife(store);
+  const two = await setup({ store, clock: ntpClock(one.clock.now() + 2_000) });
+  await two.app.start({ ...CONFIG, address: '192.168.1.61' });
+  await two.app.idle();
+  assert.equal(two.client.calls.length, 1, 'another address after a restart: read at once');
+  await two.app.stop();
+});
+
+test('I-r3-1: a container restarting in a loop (7 new processes of 5 s): one read only', async () => {
+  const store = createMemoryStore();
+  let wall = START;
+  let reads = 0;
+  for (let i = 0; i < 7; i += 1) {
+    const life = await setup({ store, clock: ntpClock(wall) });
+    await life.app.start(CONFIG);
+    await life.app.idle();
+    await life.advance(5_000);
+    await life.app.stop();
+    reads += life.client.calls.length;
+    wall = life.clock.now() + 200;
+  }
+  assert.equal(reads, 1);
+});
+
+test('I-r3-1: a new process after a long stop reads at once (the wait never outlasts its deadline)', async () => {
+  const store = createMemoryStore();
+  const one = await firstLife(store);
+  const two = await setup({ store, clock: ntpClock(one.clock.now() + 2 * HOUR) });
+  await two.app.start(CONFIG);
+  await two.app.idle();
+  assert.equal(two.client.calls.length, 1);
+  await two.app.stop();
+});
+
+test('I-r3-1: in a new process, a wall clock set back 10 h during the wait never postpones it', async () => {
+  const store = createMemoryStore();
+  const one = await firstLife(store);
+  const clock = ntpClock(one.clock.now() + 2_000);
+  const two = await setup({ store, clock });
+  await two.app.start(CONFIG);
+  await two.app.idle();
+  clock.shift(-10 * HOUR);
+  await two.advance(75_000);
+  assert.equal(two.client.calls.length, 0);
+  await two.advance(10_000);
+  assert.equal(two.client.calls.length, 1);
+  await two.app.stop();
+});
+
+test('m-r3-1 (N2): a life started 10 h late, corrected before its first read: the production of the stop passes', async () => {
+  const store = createMemoryStore();
+  let production = 12_345_678;
+  const script = () => answer({ '_sum/ProductionActiveEnergy': production });
+  const one = await firstLife(store, { devices: [created()], script });
+  assert.equal(last(one.gladys, 'production_index'), 12345.678);
+  // Stopped 2 h, 10 kW meanwhile: +20 kWh. The new process starts with the
+  // wall clock 10 h late (before NTP), corrected before its first read.
+  production += 20_000;
+  const clock = ntpClock(one.clock.now() + 2 * HOUR - 10 * HOUR);
+  const two = await setup({ store, clock, devices: [created()], script });
+  await two.app.start(CONFIG);
+  await two.app.idle();
+  clock.shift(10 * HOUR);
+  await two.advance(95_000);
+  assert.equal(two.client.calls.length, 1);
+  assert.equal(last(two.gladys, 'production_index'), 12365.678, '2 h of production: plausible');
+  assert.doesNotMatch(status(two.gladys).message.en, /held back/);
+  await two.app.stop();
+});
+
+test('m-r3-3: the client of the app paces the token on the monotonic clock of the app', () => {
+  const monotonic = () => 42;
+  const app = new OpenemsApp({
+    gladys: createFakeGladys({ selector: 'openems', config: {} }),
+    logger: createLogger(),
+    store: createMemoryStore(),
+    monotonic,
+  });
+  assert.equal(app.client.monotonic, monotonic);
 });

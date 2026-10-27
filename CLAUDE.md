@@ -68,7 +68,10 @@ test/helpers/fakeEdge.js          a fake Edge on a real WebSocket server
   only new fields or the test button (one try per click) try again.
 - **Pace**: never a read faster than the interval, whatever asks. One session
   at a time; a stop cuts it. A read of an old generation publishes nothing
-  and sets no status. Each decision reads each clock once.
+  and sets no status. Each decision reads each clock once. A monotonic
+  instant belongs to its process (a restarted container starts it near 0):
+  what crosses a restart is a wall date in /data, turned into a deadline at
+  load; a deadline is `undefined` or a number, never told by its sign.
 - **Lifetime counters** (`COUNTERS` in `src/devices.js`): through
   `IndexGuard`, never 0, never a drop nor a jump without the two-click action.
   The production index is the only index; everything else is a plain sensor.

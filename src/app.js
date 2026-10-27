@@ -34,7 +34,11 @@
 // (`sessionNow`), so that NTP moving the wall clock by hours never widens nor
 // narrows their margin (review r1, I1; lesson of gladys-p1-monitor). The wall
 // clock itself only dates what /data keeps for a restart. Each decision reads
-// each clock once.
+// each clock once. A monotonic instant belongs to its process: none is kept
+// in /data, a new process (a restarted container) starts its monotonic clock
+// near 0, and what crosses a restart (the last session, the dates of the
+// guards) is a wall date in /data, turned into a deadline or a date of this
+// process when loaded; no deadline is ever told by its sign (review r3, I-r3-1).
 // -----------------------------------------------------------------------------
 
 import { createHash } from 'node:crypto';
@@ -103,7 +107,7 @@ export class OpenemsApp {
     /** The session clock: wall at the start of the process + monotonic elapsed since. */
     this.wallStart = now();
     this.monoStart = monotonic();
-    this.client = client ?? new OpenemsClient();
+    this.client = client ?? new OpenemsClient({ monotonic });
     this.store = store;
     this.loadStore();
     this.savedKey = undefined;
@@ -114,7 +118,7 @@ export class OpenemsApp {
     this.lastAttemptMono = undefined;
     /** Unreachable / odd answer: failures in a row, the monotonic time of the next try. */
     this.failures = 0;
-    this.retryAtMono = 0;
+    this.retryAtMono = undefined;
     this.lastError = undefined;
     /** The values of the last good read, its monotonic and wall times, the Edge of its log-in. */
     this.values = undefined;
@@ -170,13 +174,19 @@ export class OpenemsApp {
     /**
      * After a restart of the container: the first read waits the interval
      * and the minute the last session may have come after the one written.
+     * `restartMono` is the monotonic deadline of that minute, taken once here
+     * on THIS process's clock (review r2, m-r2-3: a wall clock set back during
+     * the wait never postpones the read); the read waits it plus the interval.
+     * A new process starts its monotonic clock near 0, so the deadline is often
+     * below 0: a plain number, never tested by its sign; `undefined` is "no
+     * wait" (review r3, I-r3-1).
      */
-    // Turned into a monotonic instant at once (review r2, m-r2-3): a wall
-    // clock set back during the wait never postpones the first read.
-    this.restartedAt =
+    const mono = this.monotonic();
+    const now = this.now();
+    this.restartMono =
       this.kept.lastAttemptAt > 0
-        ? this.monotonic() - Math.max(0, this.now() - this.kept.lastAttemptAt)
-        : 0;
+        ? mono - Math.max(0, now - this.kept.lastAttemptAt) + ATTEMPT_SAVE_EVERY
+        : undefined;
   }
 
   /**
@@ -285,7 +295,7 @@ export class OpenemsApp {
       // its counters stay: they belong to the host name of the Edge).
       Object.assign(this.kept, { address, lastAttemptAt: 0, refusal: null });
       this.savedAttemptAt = 0;
-      this.restartedAt = 0;
+      this.restartMono = undefined;
       this.forgetPace();
       this.values = undefined;
       changed = true;
@@ -303,7 +313,7 @@ export class OpenemsApp {
       if (other) {
         // New log-in fields: tried at once, the refusal forgotten.
         this.kept.refusal = null;
-        this.restartedAt = 0;
+        this.restartMono = undefined;
         this.forgetPace();
         changed = true;
       }
@@ -339,7 +349,7 @@ export class OpenemsApp {
   forgetPace() {
     this.lastAttemptMono = undefined;
     this.failures = 0;
-    this.retryAtMono = 0;
+    this.retryAtMono = undefined;
     this.lastError = undefined;
   }
 
@@ -567,10 +577,12 @@ export class OpenemsApp {
       // Never sooner than the interval (the timer looks every 5 s: 30 to 35 s at 30 s).
       at.push(now + this.lastAttemptMono + this.intervalMs() - mono);
     }
-    if (!manual && this.retryAtMono > mono) at.push(now + this.retryAtMono - mono);
-    if (this.restartedAt > 0) {
-      // Monotonic, as the interval (review r2, m-r2-3).
-      at.push(now + this.restartedAt + ATTEMPT_SAVE_EVERY + this.intervalMs() - mono);
+    if (!manual && this.retryAtMono !== undefined && this.retryAtMono > mono) {
+      at.push(now + this.retryAtMono - mono);
+    }
+    if (this.restartMono !== undefined) {
+      // Monotonic, as the interval (review r2, m-r2-3; r3, I-r3-1).
+      at.push(now + this.restartMono + this.intervalMs() - mono);
     }
     if (!manual && this.kept.refusal) at.push(Infinity);
     return Math.max(...at);
@@ -607,7 +619,7 @@ export class OpenemsApp {
     const alive = () => generation === this.generation;
     // Recorded first: neither a reconnection, a save nor a restart reads sooner.
     this.lastAttemptMono = this.monotonic();
-    this.restartedAt = 0;
+    this.restartMono = undefined;
     this.kept.lastAttemptAt = this.now();
     await this.saveState();
     let answer;
@@ -622,7 +634,7 @@ export class OpenemsApp {
       return;
     }
     this.failures = 0;
-    this.retryAtMono = 0;
+    this.retryAtMono = undefined;
     this.lastError = undefined;
     // The fingerprint of a refused log-in goes with the first success.
     this.kept.refusal = null;
@@ -843,7 +855,7 @@ export class OpenemsApp {
       return;
     }
     if (this.lastError) {
-      const wait = Math.max(0, this.retryAtMono - mono);
+      const wait = this.retryAtMono === undefined ? 0 : Math.max(0, this.retryAtMono - mono);
       await this.setStatus(false, T.failing(address, this.lastError, wait));
       return;
     }

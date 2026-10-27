@@ -51,7 +51,10 @@ Each read opens one connection to the Edge, logs in, subscribes to the values,
 takes the first values the Edge sends, and closes. The password is sent once:
 the next reads log in with the token the Edge gave (kept in memory only, never
 in the logs nor in `/data`), so the Edge does not pile up one token per read;
-after a restart of the Edge or of the integration, the password is sent again. One connection at a time,
+after a restart of the Edge or of the integration, the password is sent again.
+If the Edge does not answer a log-in by token, or closes the connection on it,
+that read fails and the next reads send the password for 5 min (then 10, 20…
+up to 6 h while it goes on) before the token is tried again. One connection at a time,
 never faster than the interval: not on the test button, not on Discovery, not
 on a reconnection, not after a restart of the container (it waits the interval
 plus one minute after the last session). A new address or a new password is
@@ -75,7 +78,10 @@ A lifetime counter only rises. Every counter goes through a guard:
   sent again, the status shows it, and time never confirms it (the guard runs
   on the elapsed time of the integration, so a clock corrected by hours while
   it runs changes nothing; at its restart it starts again from the system
-  time, and a date saved in the future is brought back to now);
+  time, and a date saved in the future is brought back to now; a system time
+  wrong by hours around a restart, never corrected during the run before or
+  wrongly set ahead after the restart and before the first value read, can
+  widen the margin of that first value only);
 - if it is right, click **Accept the held counter** twice (the first click
   lists, the second, from 3 s to 5 min later, accepts exactly what was
   listed). After a drop is accepted, counting goes on from the new value; the

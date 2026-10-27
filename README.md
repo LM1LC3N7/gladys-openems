@@ -10,7 +10,8 @@ affiliated with FENECON nor the OpenEMS Association.
 - State of charge, battery, grid, production and house powers.
 - Lifetime energy counters (production, house, grid bought and sold, battery
   charge and discharge), each guarded: never 0, never a drop nor an
-  implausible jump without a two-click acceptance.
+  implausible jump without a two-click acceptance (one case aside, a system
+  clock wrong by hours across a restart: see the user guide).
 - A production index for the Gladys energy monitoring (or "Sensor only").
 - System state and grid mode.
 - No cloud, one connection per read, never faster than the interval (except
