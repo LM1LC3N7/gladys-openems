@@ -1,6 +1,6 @@
 {
   "name": "gladys-openems",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "FENECON FEMS and OpenEMS storage systems for Gladys Assistant: state of charge, powers, production, grid, lifetime energy counters, system state and a production index, read locally through the JSON-RPC WebSocket API of the Edge. Read-only.",
   "type": "module",

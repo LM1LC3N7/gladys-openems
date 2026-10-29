@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-29
+
 ### Fixed
 
 - The counter guard keeps the value you accepted as a floor: after an
@@ -38,5 +40,6 @@ the notes of the version's GitHub Release.
   minute after the last session, also in a new process.
 - Grid mode 3 (off-grid with a genset).
 
-[Unreleased]: https://github.com/LM1LC3N7/gladys-openems/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/LM1LC3N7/gladys-openems/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/LM1LC3N7/gladys-openems/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/LM1LC3N7/gladys-openems/releases/tag/v0.1.1
